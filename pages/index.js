@@ -289,7 +289,7 @@ export default function DealFinder() {
 Search query: "${q}"${loc ? `\nUser location: ${loc}` : ""}
 Active platforms: ${activePlatforms}
 
-Return ONLY a valid JSON array of exactly 9 listings. No markdown, no explanation, no code fences — just the raw JSON array.
+Return ONLY a valid JSON array of exactly 20 listings. No markdown, no explanation, no code fences — just the raw JSON array.
 
 Each listing object must have these exact keys:
 - "id": unique short string (e.g. "r1", "r2")
@@ -316,7 +316,7 @@ Rules:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 4000,
+          max_tokens: 8000,
           messages: [{ role: "user", content: prompt }],
         }),
       });
@@ -546,7 +546,7 @@ Rules:
           {/* Skeleton grid */}
           {loading && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 14 }}>
-              {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} />)}
+              {Array.from({ length: 20 }).map((_, i) => <Skeleton key={i} />)}
             </div>
           )}
 
