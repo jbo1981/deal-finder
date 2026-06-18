@@ -1,289 +1,664 @@
-import { useState } from "react";
-import Head from "next/head";
+import { useState, useRef, useCallback, useEffect } from "react";
 
-const PLATFORMS = {
-  facebook: {
-    label: "Facebook Marketplace",
-    color: "#1877f2",
-    bg: "#eff6ff",
-    buildUrl: (query, maxPrice, radius) =>
-      `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(query)}&maxPrice=${encodeURIComponent(maxPrice)}&radius=${encodeURIComponent(radius)}`,
-  },
-  ebay: {
-    label: "eBay",
-    color: "#e53238",
-    bg: "#fff0f0",
-    buildUrl: (query, maxPrice) =>
-      `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&_udhi=${encodeURIComponent(maxPrice)}&LH_ItemCondition=3000&LH_BIN=1`,
-  },
-  offerup: {
-    label: "OfferUp",
-    color: "#0ab56b",
-    bg: "#f0fdf4",
-    buildUrl: (query, maxPrice, radius) =>
-      `https://offerup.com/search/?q=${encodeURIComponent(query)}&price_max=${encodeURIComponent(maxPrice)}&radius=${encodeURIComponent(radius)}`,
-  },
-  amazon: {
-    label: "Amazon",
-    color: "#ff9900",
-    bg: "#fffbeb",
-    buildUrl: (query, maxPrice) =>
-      `https://www.amazon.com/s?k=${encodeURIComponent(query)}&rh=p_36%3A..${encodeURIComponent(maxPrice * 100)}&condition=used`,
-  },
-};
+/* ─── Constants ─── */
+const PLATFORMS = [
+  { id: "amazon",     label: "Amazon",     emoji: "🛒", color: "#E47911" },
+  { id: "ebay",       label: "eBay",       emoji: "🔴", color: "#E53238" },
+  { id: "walmart",    label: "Walmart",    emoji: "⭐", color: "#0071CE" },
+  { id: "craigslist", label: "Craigslist", emoji: "📋", color: "#8B1A1A" },
+  { id: "offerup",    label: "OfferUp",    emoji: "🏷️", color: "#18A558" },
+  { id: "mercari",    label: "Mercari",    emoji: "📦", color: "#C7002A" },
+];
 
-const demoListings = {
-  facebook: [
-    "Trek Marlin 7 mountain bike | 320 | 650 | 8 | 2 | moving, must sell, helmet included",
-    "Giant Talon hardtail | 260 | 575 | 32 | 1 | obo, leaving town, quick pickup",
-    "Old mountain bike project | 90 | 180 | 12 | 96 | needs work, as-is",
-  ].join("\n"),
-  ebay: [
-    "Trek Marlin 7 mountain bike | 310 | 650 | 0 | 1 | buy it now, free shipping",
-    "Specialized Rockhopper 29 | 499 | 700 | 0 | 4 | excellent condition",
-    "Schwinn Axum mountain bike | 189 | 310 | 0 | 48 | good used condition",
-  ].join("\n"),
-  offerup: [
-    "Cannondale Trail 5 | 400 | 850 | 15 | 3 | need gone today, cash only",
-    "Mongoose mountain bike | 120 | 250 | 7 | 10 | lightly used",
-    "GT Aggressor Pro | 275 | 480 | 22 | 6 | obo",
-  ].join("\n"),
-  amazon: [
-    "Schwinn High Timber mountain bike | 280 | 420 | 0 | 2 | used - very good",
-    "Huffy Stone Mountain bike | 150 | 230 | 0 | 5 | used - good",
-    "Kent Bayside cruiser | 90 | 160 | 0 | 12 | used - acceptable",
-  ].join("\n"),
-};
+const SORT_OPTIONS = [
+  { id: "score",      label: "Best Deal" },
+  { id: "price_asc",  label: "Price ↑" },
+  { id: "price_desc", label: "Price ↓" },
+  { id: "newest",     label: "Newest" },
+];
 
-const urgencyKeywords = ["moving","must sell","need gone","obo","leaving town","quick pickup","today","cash only","priced to sell","free shipping","buy it now"];
-const conditionRiskKeywords = ["needs work","broken","as-is","parts only","repair","not working","acceptable","fair"];
+const SUGGESTIONS = [
+  "iPhone 15", "PlayStation 5", "MacBook Air", "Trek bike",
+  "Vitamix blender", "AirPods Pro", "Nintendo Switch", "Dyson vacuum",
+];
 
-function money(v) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(v);
+/* ─── Helpers ─── */
+function scoreColor(s) {
+  if (s >= 85) return "#16a34a";
+  if (s >= 65) return "#d97706";
+  return "#dc2626";
+}
+function scoreLabel(s) {
+  if (s >= 85) return "🔥 Hot";
+  if (s >= 65) return "👍 Good";
+  return "Fair";
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+/* ─── Sub-components ─── */
+function ScoreRing({ score }) {
+  const c = scoreColor(score);
+  const r = 18, cx = 20, cy = 20, stroke = 3;
+  const circ = 2 * Math.PI * r;
+  const dash = (score / 100) * circ;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+      <svg width={40} height={40} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e5e7eb" strokeWidth={stroke} />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={c} strokeWidth={stroke}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+          style={{ transition: "stroke-dasharray 0.6s cubic-bezier(.23,1,.32,1)" }} />
+        <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+          style={{ transform: "rotate(90deg)", transformOrigin: "20px 20px", fill: c, fontSize: 10, fontWeight: 700, fontFamily: "Inter, sans-serif" }}>
+          {score}
+        </text>
+      </svg>
+      <span style={{ fontSize: 10, fontWeight: 700, color: c, letterSpacing: "0.04em" }}>{scoreLabel(score)}</span>
+    </div>
+  );
 }
 
-function parseListing(line) {
-  const parts = line.split("|").map(p => p.trim());
-  if (parts.length < 5) return null;
-  const [title, priceRaw, valueRaw, distanceRaw, hoursRaw, keywordsRaw = ""] = parts;
-  const price = Number(priceRaw.replace(/[^0-9.]/g, ""));
-  const typicalValue = Number(valueRaw.replace(/[^0-9.]/g, ""));
-  const distance = Number(distanceRaw.replace(/[^0-9.]/g, ""));
-  const hoursAgo = Number(hoursRaw.replace(/[^0-9.]/g, ""));
-  const keywords = keywordsRaw.toLowerCase();
-  if (!title || !Number.isFinite(price) || !Number.isFinite(typicalValue) || typicalValue <= 0) return null;
-  return { title, price, typicalValue, distance, hoursAgo, keywords };
+function SourceBadge({ source }) {
+  const p = PLATFORMS.find(x => x.id === source) || { label: source, emoji: "🔗", color: "#6366f1" };
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 3,
+      padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+      background: p.color + "18", color: p.color,
+      border: `1px solid ${p.color}35`,
+    }}>
+      {p.emoji} {p.label}
+    </span>
+  );
 }
 
-function scoreListing(listing, sensitivity, platform) {
-  const discountPercent = Math.max(0, (listing.typicalValue - listing.price) / listing.typicalValue);
-  const rawSavings = Math.max(0, listing.typicalValue - listing.price);
-  const distancePenalty = platform === "ebay" || platform === "amazon" ? 0 : Math.min(18, (listing.distance || 0) * 0.28);
-  const freshnessBonus = listing.hoursAgo <= 4 ? 10 : listing.hoursAgo <= 24 ? 5 : listing.hoursAgo <= 72 ? 1 : -5;
-  const urgencyBonus = urgencyKeywords.filter(k => listing.keywords.includes(k)).length * 4;
-  const riskPenalty = conditionRiskKeywords.filter(k => listing.keywords.includes(k)).length * 8;
-  let score = discountPercent * 82 + Math.min(14, rawSavings / 35) - distancePenalty + freshnessBonus + urgencyBonus - riskPenalty;
-  if (sensitivity === "flipper") score += Math.min(16, rawSavings / 28) + urgencyBonus * 0.5;
-  if (sensitivity === "personal") { score += listing.distance <= 10 ? 6 : 0; score -= riskPenalty * 0.5; }
-  score = Math.max(0, Math.min(100, Math.round(score)));
-  return { ...listing, discountPercent, rawSavings, score, grade: score >= 72 ? "Strong deal" : score >= 48 ? "Worth checking" : "Low priority", tone: score >= 72 ? "good" : score >= 48 ? "ok" : "bad" };
+function Card({ item, favorited, onFavorite, animate, idx }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: "#fff",
+        border: "1px solid #e9eaf0",
+        borderRadius: 16,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: hovered
+          ? "0 12px 40px rgba(79,70,229,.13), 0 2px 8px rgba(0,0,0,.06)"
+          : "0 1px 4px rgba(0,0,0,.05)",
+        transform: hovered ? "translateY(-3px)" : "none",
+        transition: "box-shadow .2s, transform .2s",
+        animation: animate ? `fadeUp .35s ${idx * 0.04}s both` : "none",
+      }}
+    >
+      {/* Image area */}
+      <div style={{
+        height: 148, position: "relative",
+        background: "linear-gradient(135deg, #ede9fe 0%, #dbeafe 100%)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 52,
+      }}>
+        {item.emoji}
+        {item.dealScore >= 85 && (
+          <div style={{
+            position: "absolute", top: 10, left: 10,
+            background: "#16a34a", color: "#fff",
+            fontSize: 9, fontWeight: 800, padding: "3px 9px",
+            borderRadius: 999, letterSpacing: "0.07em", textTransform: "uppercase",
+          }}>
+            Best Deal
+          </div>
+        )}
+        <button
+          onClick={() => onFavorite(item.id)}
+          style={{
+            position: "absolute", top: 8, right: 8,
+            width: 32, height: 32, borderRadius: "50%",
+            border: "none", cursor: "pointer",
+            background: favorited ? "#fee2e2" : "rgba(255,255,255,.9)",
+            fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 1px 4px rgba(0,0,0,.1)",
+            transition: "background .15s, transform .1s",
+          }}
+          onMouseDown={e => e.currentTarget.style.transform = "scale(.88)"}
+          onMouseUp={e => e.currentTarget.style.transform = "scale(1)"}
+        >
+          {favorited ? "❤️" : "🤍"}
+        </button>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: "12px 14px 14px", display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+          <SourceBadge source={item.source} />
+          <ScoreRing score={item.dealScore} />
+        </div>
+
+        <p style={{
+          margin: 0, fontSize: 13.5, fontWeight: 500, lineHeight: 1.45,
+          color: "#111827",
+          display: "-webkit-box", WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>
+          {item.title}
+        </p>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 21, fontWeight: 800, color: "#4f46e5", fontVariantNumeric: "tabular-nums" }}>
+            ${item.price.toLocaleString()}
+          </span>
+          {item.originalPrice && (
+            <span style={{ fontSize: 13, color: "#9ca3af", textDecoration: "line-through", fontVariantNumeric: "tabular-nums" }}>
+              ${item.originalPrice.toLocaleString()}
+            </span>
+          )}
+          {item.originalPrice && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#16a34a", background: "#dcfce7", padding: "1px 6px", borderRadius: 999 }}>
+              -{Math.round((1 - item.price / item.originalPrice) * 100)}%
+            </span>
+          )}
+        </div>
+
+        {item.location && (
+          <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>📍 {item.location}</p>
+        )}
+
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          {(item.tags || []).map(t => (
+            <span key={t} style={{
+              fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 999,
+              background: "#f3f4f6", color: "#6b7280", letterSpacing: "0.03em",
+            }}>{t}</span>
+          ))}
+        </div>
+
+        <a
+          href={item.url || "#"}
+          target="_blank" rel="noreferrer"
+          style={{
+            display: "block", textAlign: "center", padding: "9px",
+            borderRadius: 10, background: "#4f46e5", color: "#fff",
+            fontSize: 13, fontWeight: 700, textDecoration: "none",
+            marginTop: "auto",
+            boxShadow: "0 2px 8px rgba(79,70,229,.3)",
+            transition: "background .15s, box-shadow .15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "#4338ca"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "#4f46e5"; }}
+        >
+          View Listing →
+        </a>
+      </div>
+    </div>
+  );
 }
 
-function escapeHtml(v) {
-  return String(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+function Skeleton() {
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e9eaf0", borderRadius: 16, overflow: "hidden" }}>
+      <div style={{ height: 148, background: "linear-gradient(90deg,#f3f4f6 25%,#e9eaf0 50%,#f3f4f6 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />
+      <div style={{ padding: "12px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {[90, 70, 50].map(w => (
+          <div key={w} style={{ height: 13, width: `${w}%`, borderRadius: 6, background: "linear-gradient(90deg,#f3f4f6 25%,#e9eaf0 50%,#f3f4f6 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite" }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
-const scoreColor = { good: "#16a34a", ok: "#f59e0b", bad: "#dc2626" };
-
+/* ─── Main App ─── */
 export default function DealFinder() {
-  const [query, setQuery] = useState("mountain bike");
-  const [location, setLocation] = useState("Austin TX");
-  const [radius, setRadius] = useState("25");
-  const [maxPrice, setMaxPrice] = useState("500");
-  const [sensitivity, setSensitivity] = useState("balanced");
-  const [activePlatform, setActivePlatform] = useState("facebook");
-  const [inputs, setInputs] = useState({ facebook: "", ebay: "", offerup: "", amazon: "" });
-  const [results, setResults] = useState({ facebook: [], ebay: [], offerup: [], amazon: [] });
-  const [searchUrls, setSearchUrls] = useState({});
+  const [query, setQuery]           = useState("");
+  const [location, setLocation]     = useState("");
+  const [results, setResults]       = useState([]);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [searched, setSearched]     = useState(false);
+  const [favorites, setFavorites]   = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("df_favids") || "[]")); } catch { return new Set(); }
+  });
+  const [favItems, setFavItems]     = useState(() => {
+    try { return JSON.parse(localStorage.getItem("df_favitems") || "[]"); } catch { return []; }
+  });
+  const [saved, setSaved]           = useState(() => {
+    try { return JSON.parse(localStorage.getItem("df_saved") || "[]"); } catch { return []; }
+  });
+  const [platforms, setPlatforms]   = useState(new Set(PLATFORMS.map(p => p.id)));
+  const [sort, setSort]             = useState("score");
+  const [tab, setTab]               = useState("search");   // search | favorites | saved
+  const [animate, setAnimate]       = useState(false);
+  const inputRef = useRef(null);
 
-  function generateAllLinks() {
-    const urls = {};
-    Object.entries(PLATFORMS).forEach(([key, p]) => {
-      urls[key] = p.buildUrl(query, maxPrice, radius);
+  /* Persist favorites */
+  useEffect(() => {
+    try {
+      localStorage.setItem("df_favids", JSON.stringify([...favorites]));
+      localStorage.setItem("df_favitems", JSON.stringify(favItems));
+    } catch {}
+  }, [favorites, favItems]);
+
+  useEffect(() => {
+    try { localStorage.setItem("df_saved", JSON.stringify(saved)); } catch {}
+  }, [saved]);
+
+  /* Toggle platform */
+  const togglePlatform = id => setPlatforms(prev => {
+    const n = new Set(prev);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  /* Toggle favorite */
+  const toggleFav = useCallback((id) => {
+    setFavorites(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) {
+        n.delete(id);
+        setFavItems(fi => fi.filter(x => x.id !== id));
+      } else {
+        n.add(id);
+        const item = results.find(r => r.id === id);
+        if (item) setFavItems(fi => [item, ...fi.filter(x => x.id !== id)]);
+      }
+      return n;
     });
-    setSearchUrls(urls);
-  }
+  }, [results]);
 
-  function scoreCurrentPlatform() {
-    const max = Number(maxPrice || Infinity);
-    const scored = (inputs[activePlatform] || "").split("\n").map(l => l.trim()).filter(Boolean)
-      .map(parseListing).filter(Boolean)
-      .filter(l => l.price <= max)
-      .map(l => scoreListing(l, sensitivity, activePlatform))
-      .sort((a, b) => b.score - a.score || b.rawSavings - a.rawSavings);
-    setResults(prev => ({ ...prev, [activePlatform]: scored }));
-  }
+  /* Save search */
+  const saveSearch = () => {
+    if (!query.trim()) return;
+    const entry = { id: Date.now(), query: query.trim(), location: location.trim(), platforms: [...platforms] };
+    setSaved(prev => [entry, ...prev.filter(s => s.query !== query.trim())].slice(0, 20));
+  };
 
-  function loadDemo() {
-    setInputs(prev => ({ ...prev, [activePlatform]: demoListings[activePlatform] }));
-    generateAllLinks();
-    const max = Number(maxPrice || Infinity);
-    const scored = demoListings[activePlatform].split("\n").map(l => l.trim()).filter(Boolean)
-      .map(parseListing).filter(Boolean)
-      .filter(l => l.price <= max)
-      .map(l => scoreListing(l, sensitivity, activePlatform))
-      .sort((a, b) => b.score - a.score || b.rawSavings - a.rawSavings);
-    setResults(prev => ({ ...prev, [activePlatform]: scored }));
-  }
+  /* Search */
+  const doSearch = useCallback(async (q = query, loc = location) => {
+    if (!q.trim()) { inputRef.current?.focus(); return; }
+    setLoading(true);
+    setError(null);
+    setSearched(true);
+    setTab("search");
+    setAnimate(false);
 
-  const allResults = Object.values(results).flat();
-  const bestScore = allResults.length ? Math.max(...allResults.map(r => r.score)) : "—";
-  const avgDiscount = allResults.length ? Math.round(allResults.reduce((s, r) => s + r.discountPercent, 0) / allResults.length * 100) + "%" : "—";
-  const totalCount = allResults.length;
+    const activePlatforms = [...platforms].join(", ");
 
-  const platform = PLATFORMS[activePlatform];
-  const currentResults = results[activePlatform] || [];
+    const prompt = `You are a real marketplace search engine returning actual product listings.
+
+Search query: "${q}"${loc ? `\nUser location: ${loc}` : ""}
+Active platforms: ${activePlatforms}
+
+Return ONLY a valid JSON array of exactly 9 listings. No markdown, no explanation, no code fences — just the raw JSON array.
+
+Each listing object must have these exact keys:
+- "id": unique short string (e.g. "r1", "r2")
+- "title": realistic, specific product title (include model, condition, key specs)
+- "price": number (realistic current asking price)
+- "originalPrice": number or null (MSRP/retail if there's a real discount, else null)
+- "source": exactly one of [${activePlatforms}]
+- "location": city string for local sources (craigslist, offerup, mercari) or null
+- "dealScore": integer 38–97 (score the deal honestly: high discount + good condition = high score; fair price no discount = 45-60)
+- "emoji": single emoji representing this product category
+- "tags": array of 2-3 short strings from: ["New","Like New","Good","Fair","Free Ship","Local Pickup","Bundle","Rare Find","Open Box","Refurb","Urgent","Price Drop"]
+- "url": "#"
+
+Rules:
+- Spread listings across the active platforms realistically
+- dealScore distribution should be realistic: 2-3 hot deals (80+), 4-5 good (60-79), 2 fair (38-59)
+- Prices must be realistic for the item and condition
+- originalPrice only when there's a genuine discount (at least 15% off)
+- Local platforms (craigslist, offerup, mercari) get location data`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      const raw = (data.content || []).map(c => c.text || "").join("");
+      // strip any accidental markdown fences
+      const clean = raw.replace(/```json|```/g, "").trim();
+      let items = JSON.parse(clean);
+
+      // sort
+      if (sort === "price_asc")  items.sort((a, b) => a.price - b.price);
+      else if (sort === "price_desc") items.sort((a, b) => b.price - a.price);
+      else if (sort === "newest") items.reverse();
+      else items.sort((a, b) => b.dealScore - a.dealScore);
+
+      setResults(items);
+      setAnimate(true);
+    } catch (e) {
+      setError("Search failed — please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [query, location, platforms, sort]);
+
+  const handleKey = e => { if (e.key === "Enter") doSearch(); };
+
+  /* ── Shared styles ── */
+  const tabBtn = (id) => ({
+    padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+    fontSize: 13, fontWeight: 600,
+    background: tab === id ? "#4f46e5" : "transparent",
+    color: tab === id ? "#fff" : "#6b7280",
+    transition: "background .15s, color .15s",
+  });
 
   return (
-    <>
-      <Head><title>Marketplace Deal Finder</title></Head>
-      <div style={{ fontFamily: "system-ui,sans-serif", background: "#f4f7fb", minHeight: "100vh", padding: "24px 16px" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ minHeight: "100dvh", background: "#f8f8fc", fontFamily: "Inter, system-ui, sans-serif", color: "#111827" }}>
 
-          {/* Hero */}
-          <div style={{ background: "#fff", borderRadius: 20, padding: "28px 28px 24px", marginBottom: 24, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-            <div style={{ display: "inline-block", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 14px", fontWeight: 700, fontSize: 13, marginBottom: 14 }}>⚡ Multi-platform deal scanner</div>
-            <h1 style={{ fontSize: "clamp(28px,5vw,52px)", margin: "0 0 12px", letterSpacing: "-0.04em", lineHeight: 1 }}>Find underpriced listings faster.</h1>
-            <p style={{ color: "#637083", fontSize: 16, margin: "0 0 20px" }}>Search Facebook Marketplace, eBay, OfferUp, and Amazon. Paste listings and rank by discount, urgency, and resale potential.</p>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button onClick={loadDemo} style={{ background: "#1877f2", color: "#fff", border: 0, borderRadius: 12, padding: "11px 20px", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>Load demo listings</button>
-              <button onClick={generateAllLinks} style={{ background: "#f1f5f9", color: "#334155", border: 0, borderRadius: 12, padding: "11px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Generate all search links</button>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+        @keyframes fadeUp  { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+        @keyframes spin    { to{transform:rotate(360deg)} }
+        input::placeholder { color: #9ca3af; }
+        a { text-decoration: none; }
+        button { font-family: inherit; }
+        ::-webkit-scrollbar { width:5px; height:5px; }
+        ::-webkit-scrollbar-thumb { background:#d1d5db; border-radius:9999px; }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+      `}</style>
+
+      {/* ── Header ── */}
+      <header style={{
+        position: "sticky", top: 0, zIndex: 50,
+        background: "rgba(255,255,255,.88)",
+        backdropFilter: "blur(14px) saturate(160%)",
+        WebkitBackdropFilter: "blur(14px) saturate(160%)",
+        borderBottom: "1px solid #e9eaf0",
+      }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 16px", height: 54, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+
+          {/* Logo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg,#6366f1,#4f46e5)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17,
+              boxShadow: "0 2px 8px rgba(79,70,229,.35)",
+            }}>🔍</div>
+            <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-0.03em", color: "#111827" }}>
+              Deal<span style={{ color: "#4f46e5" }}>Finder</span>
+            </span>
+          </div>
+
+          {/* Nav tabs */}
+          <nav style={{ display: "flex", gap: 4 }}>
+            <button style={tabBtn("search")} onClick={() => setTab("search")}>Search</button>
+            <button style={tabBtn("favorites")} onClick={() => setTab("favorites")}>
+              ❤️{favorites.size > 0 ? ` ${favorites.size}` : ""}
+            </button>
+            <button style={tabBtn("saved")} onClick={() => setTab("saved")}>
+              🔖{saved.length > 0 ? ` ${saved.length}` : ""}
+            </button>
+          </nav>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 48px" }}>
+
+        {/* ══ SEARCH TAB ══ */}
+        {tab === "search" && (<>
+
+          {/* Hero (only before first search) */}
+          {!searched && (
+            <div style={{ textAlign: "center", padding: "36px 0 28px" }}>
+              <div style={{ fontSize: 44, marginBottom: 14 }}>🏷️</div>
+              <h1 style={{ fontSize: "clamp(26px,5vw,46px)", fontWeight: 800, letterSpacing: "-0.035em", lineHeight: 1.08, marginBottom: 12 }}>
+                Find the best deal<br />
+                <span style={{ color: "#4f46e5" }}>across every marketplace</span>
+              </h1>
+              <p style={{ fontSize: 15, color: "#6b7280", maxWidth: 440, margin: "0 auto 28px" }}>
+                Amazon, eBay, Walmart, Craigslist, OfferUp & Mercari — searched and scored in one shot.
+              </p>
             </div>
+          )}
+
+          {/* Search bar */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="What are you looking for? e.g. iPhone 15, Trek bike…"
+              style={{
+                flex: "1 1 220px", padding: "11px 16px", borderRadius: 11,
+                border: "1.5px solid #e2e3ef", fontSize: 15,
+                background: "#fff", color: "#111827", outline: "none",
+                boxShadow: "0 1px 4px rgba(79,70,229,.06)",
+                transition: "border-color .15s, box-shadow .15s",
+              }}
+              onFocus={e => { e.target.style.borderColor = "#4f46e5"; e.target.style.boxShadow = "0 0 0 3px rgba(79,70,229,.12)"; }}
+              onBlur={e => { e.target.style.borderColor = "#e2e3ef"; e.target.style.boxShadow = "0 1px 4px rgba(79,70,229,.06)"; }}
+            />
+            <input
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="ZIP or city"
+              style={{
+                flex: "0 1 150px", padding: "11px 14px", borderRadius: 11,
+                border: "1.5px solid #e2e3ef", fontSize: 15,
+                background: "#fff", color: "#111827", outline: "none",
+              }}
+              onFocus={e => { e.target.style.borderColor = "#4f46e5"; }}
+              onBlur={e => { e.target.style.borderColor = "#e2e3ef"; }}
+            />
+            <button
+              onClick={() => doSearch()}
+              disabled={loading}
+              style={{
+                padding: "11px 22px", borderRadius: 11, border: "none",
+                background: loading ? "#a5b4fc" : "linear-gradient(135deg,#6366f1,#4f46e5)",
+                color: "#fff", fontSize: 15, fontWeight: 700, cursor: loading ? "default" : "pointer",
+                boxShadow: loading ? "none" : "0 2px 10px rgba(79,70,229,.35)",
+                transition: "all .15s", whiteSpace: "nowrap",
+                display: "flex", alignItems: "center", gap: 8,
+              }}
+            >
+              {loading && <span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin .7s linear infinite", display: "inline-block" }} />}
+              {loading ? "Searching…" : "Search"}
+            </button>
           </div>
 
-          {/* Stats */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 24 }}>
-            {[["Best deal score", bestScore], ["Avg discount", avgDiscount], ["Total ranked", totalCount]].map(([label, val]) => (
-              <div key={label} style={{ background: "#fff", borderRadius: 16, padding: "18px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-                <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: "-0.04em" }}>{val}</div>
-                <div style={{ color: "#637083", fontSize: 13 }}>{label}</div>
-              </div>
-            ))}
+          {/* Platform toggles */}
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
+            {PLATFORMS.map(p => {
+              const on = platforms.has(p.id);
+              return (
+                <button key={p.id} onClick={() => togglePlatform(p.id)} style={{
+                  padding: "4px 11px", borderRadius: 999, fontSize: 12, fontWeight: 700,
+                  border: `1.5px solid ${on ? p.color : "#e2e3ef"}`,
+                  background: on ? p.color + "15" : "transparent",
+                  color: on ? p.color : "#9ca3af",
+                  cursor: "pointer", transition: "all .15s",
+                }}>
+                  {p.emoji} {p.label}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Platform tabs */}
-          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-            {Object.entries(PLATFORMS).map(([key, p]) => (
-              <button key={key} onClick={() => setActivePlatform(key)} style={{
-                background: activePlatform === key ? p.color : "#fff",
-                color: activePlatform === key ? "#fff" : "#334155",
-                border: `2px solid ${activePlatform === key ? p.color : "#dbe4ef"}`,
-                borderRadius: 12, padding: "10px 18px", fontWeight: 800, fontSize: 14, cursor: "pointer",
-                boxShadow: activePlatform === key ? `0 4px 14px ${p.color}44` : "none"
-              }}>
-                {p.label}
-                {results[key].length > 0 && (
-                  <span style={{ marginLeft: 8, background: activePlatform === key ? "rgba(255,255,255,0.3)" : p.color, color: "#fff", borderRadius: 999, padding: "2px 7px", fontSize: 12 }}>
-                    {results[key].length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* Main grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20 }}>
-
-            {/* Sidebar */}
-            <div style={{ background: "#fff", borderRadius: 20, padding: 22, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", alignSelf: "start" }}>
-              <h2 style={{ margin: "0 0 16px", fontSize: 20 }}>Search setup</h2>
-              {[["What are you hunting for?", query, setQuery, "text", "e.g. iPhone 14"],["Location or city", location, setLocation, "text", "e.g. Denver CO"],["Max price", maxPrice, setMaxPrice, "number", "500"]].map(([label, val, setter, type, ph]) => (
-                <div key={label} style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{label}</label>
-                  <input value={val} onChange={e => setter(e.target.value)} type={type} placeholder={ph} style={{ width: "100%", border: "1px solid #dbe4ef", borderRadius: 10, padding: "10px 12px", fontSize: 14, boxSizing: "border-box" }} />
-                </div>
+          {/* Sort + Save (after first search) */}
+          {searched && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+              <span style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600 }}>SORT</span>
+              {SORT_OPTIONS.map(o => (
+                <button key={o.id} onClick={() => { setSort(o.id); doSearch(); }} style={{
+                  padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  border: `1.5px solid ${sort === o.id ? "#4f46e5" : "#e2e3ef"}`,
+                  background: sort === o.id ? "#ede9fe" : "transparent",
+                  color: sort === o.id ? "#4f46e5" : "#6b7280", cursor: "pointer",
+                }}>
+                  {o.label}
+                </button>
               ))}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Search radius <span style={{ color: "#aaa", fontWeight: 400 }}>(local platforms)</span></label>
-                <select value={radius} onChange={e => setRadius(e.target.value)} style={{ width: "100%", border: "1px solid #dbe4ef", borderRadius: 10, padding: "10px 12px", fontSize: 14 }}>
-                  {["5","10","25","50","100"].map(r => <option key={r} value={r}>{r} miles</option>)}
-                </select>
-              </div>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Deal sensitivity</label>
-                <select value={sensitivity} onChange={e => setSensitivity(e.target.value)} style={{ width: "100%", border: "1px solid #dbe4ef", borderRadius: 10, padding: "10px 12px", fontSize: 14 }}>
-                  <option value="balanced">Balanced</option>
-                  <option value="flipper">Resale / flipper focused</option>
-                  <option value="personal">Personal-use focused</option>
-                </select>
-              </div>
-              <button onClick={generateAllLinks} style={{ width: "100%", background: platform.color, color: "#fff", border: 0, borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", marginBottom: 10 }}>Generate all search links</button>
-
-              {/* Search links */}
-              {Object.keys(searchUrls).length > 0 && (
-                <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                  {Object.entries(PLATFORMS).map(([key, p]) => searchUrls[key] && (
-                    <a key={key} href={searchUrls[key]} target="_blank" rel="noopener noreferrer" style={{ display: "block", background: p.bg, color: p.color, borderRadius: 10, padding: "9px 12px", fontWeight: 700, fontSize: 13, textDecoration: "none" }}>
-                      🔗 {p.label}
-                    </a>
-                  ))}
-                </div>
-              )}
+              <button onClick={saveSearch} style={{
+                marginLeft: "auto", padding: "5px 14px", borderRadius: 8,
+                border: "1.5px solid #4f46e5", background: "transparent",
+                color: "#4f46e5", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              }}>
+                + Save Search
+              </button>
             </div>
+          )}
 
-            {/* Results panel */}
-            <div style={{ background: "#fff", borderRadius: 20, padding: 22, boxShadow: "0 2px 12px rgba(0,0,0,0.07)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
-                <h2 style={{ margin: 0, fontSize: 20 }}>{platform.label} listings</h2>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={scoreCurrentPlatform} style={{ background: platform.bg, color: platform.color, border: 0, borderRadius: 10, padding: "9px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>Score listings</button>
-                  <button onClick={() => { setInputs(p => ({ ...p, [activePlatform]: "" })); setResults(p => ({ ...p, [activePlatform]: [] })); }} style={{ background: "#f1f5f9", color: "#334155", border: 0, borderRadius: 10, padding: "9px 16px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Clear</button>
-                </div>
+          {/* Suggestion chips (before search) */}
+          {!searched && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", paddingBottom: 8 }}>
+              {SUGGESTIONS.map(s => (
+                <button key={s} onClick={() => { setQuery(s); doSearch(s, location); }} style={{
+                  padding: "7px 16px", borderRadius: 999, fontSize: 13,
+                  border: "1.5px solid #e2e3ef", background: "#fff",
+                  color: "#374151", cursor: "pointer", fontWeight: 500,
+                  transition: "border-color .15s, background .15s",
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#4f46e5"; e.currentTarget.style.background = "#ede9fe"; e.currentTarget.style.color = "#4f46e5"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#e2e3ef"; e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "#374151"; }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{ textAlign: "center", padding: "48px 16px" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+              <p style={{ fontWeight: 700, color: "#dc2626", marginBottom: 16 }}>{error}</p>
+              <button onClick={() => doSearch()} style={{ padding: "9px 22px", borderRadius: 10, border: "none", background: "#4f46e5", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {/* Skeleton grid */}
+          {loading && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 14 }}>
+              {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} />)}
+            </div>
+          )}
+
+          {/* Results grid */}
+          {!loading && !error && results.length > 0 && (
+            <>
+              <p style={{ fontSize: 13, color: "#9ca3af", marginBottom: 14 }}>
+                <strong style={{ color: "#111827" }}>{results.length} listings</strong> for "{query}"
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 14 }}>
+                {results.map((item, i) => (
+                  <Card key={item.id} item={item} favorited={favorites.has(item.id)} onFavorite={toggleFav} animate={animate} idx={i} />
+                ))}
               </div>
+            </>
+          )}
 
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Paste {platform.label} listing data</label>
-                <textarea value={inputs[activePlatform]} onChange={e => setInputs(p => ({ ...p, [activePlatform]: e.target.value }))}
-                  placeholder={activePlatform === "amazon" ? "Used Schwinn bike | 280 | 420 | 0 | 2 | used - very good" : "Trek Marlin 7 | 320 | 650 | 8 | 2 | moving, must sell"}
-                  style={{ width: "100%", minHeight: 110, border: "1px solid #dbe4ef", borderRadius: 10, padding: "10px 12px", fontSize: 13, boxSizing: "border-box", resize: "vertical", lineHeight: 1.5 }} />
-                <p style={{ color: "#637083", fontSize: 12, margin: "6px 0 0" }}>
-                  Format: Title | Price | Typical value | Distance miles | Posted hours ago | Keywords
-                  {(activePlatform === "ebay" || activePlatform === "amazon") && " (use 0 for distance on online platforms)"}
-                </p>
+          {/* Empty */}
+          {!loading && !error && searched && results.length === 0 && (
+            <div style={{ textAlign: "center", padding: "64px 16px" }}>
+              <div style={{ fontSize: 44, marginBottom: 14 }}>🔍</div>
+              <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>No results found</p>
+              <p style={{ color: "#6b7280", fontSize: 14 }}>Try different keywords or enable more platforms.</p>
+            </div>
+          )}
+        </>)}
+
+        {/* ══ FAVORITES TAB ══ */}
+        {tab === "favorites" && (
+          <div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 20, letterSpacing: "-0.02em" }}>
+              ❤️ Saved Listings
+            </h2>
+            {favItems.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "64px 16px" }}>
+                <div style={{ fontSize: 44, marginBottom: 14 }}>🤍</div>
+                <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>No favorites yet</p>
+                <p style={{ color: "#6b7280", fontSize: 14 }}>Tap the heart on any listing to save it here.</p>
               </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 14 }}>
+                {favItems.map((item, i) => (
+                  <Card key={item.id} item={item} favorited={true} onFavorite={toggleFav} animate={false} idx={i} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-              {currentResults.length === 0 && (
-                <div style={{ border: "1px dashed #dbe4ef", borderRadius: 14, padding: 24, textAlign: "center", color: "#637083" }}>
-                  No listings scored yet for {platform.label}. Load the demo or paste your own data above.
-                </div>
-              )}
-
-              <div style={{ display: "grid", gap: 12 }}>
-                {currentResults.map((item, i) => (
-                  <div key={i} style={{ border: `1px solid ${platform.color}33`, borderRadius: 16, padding: "16px 18px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ background: platform.bg, color: platform.color, borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>#{i + 1} · {item.grade}</span>
-                      <h3 style={{ margin: "10px 0 6px", fontSize: 17 }}>{escapeHtml(item.title)}</h3>
-                      <div style={{ color: "#637083", fontSize: 13, marginBottom: 8, display: "flex", flexWrap: "wrap", gap: "0 12px" }}>
-                        <span>{money(item.price)} asking</span>
-                        <span>{money(item.typicalValue)} typical</span>
-                        {activePlatform !== "ebay" && activePlatform !== "amazon" && <span>{item.distance || 0} mi</span>}
-                        <span>{item.hoursAgo || 0}h old</span>
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>Savings: {money(item.rawSavings)} ({Math.round(item.discountPercent * 100)}% off)</div>
-                      {item.keywords && <p style={{ color: "#637083", fontSize: 13, margin: "6px 0 0" }}>Signals: {escapeHtml(item.keywords)}</p>}
+        {/* ══ SAVED SEARCHES TAB ══ */}
+        {tab === "saved" && (
+          <div>
+            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 20, letterSpacing: "-0.02em" }}>
+              🔖 Saved Searches
+            </h2>
+            {saved.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "64px 16px" }}>
+                <div style={{ fontSize: 44, marginBottom: 14 }}>🔖</div>
+                <p style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>No saved searches</p>
+                <p style={{ color: "#6b7280", fontSize: 14 }}>After searching, tap "+ Save Search" to bookmark it.</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {saved.map(s => (
+                  <div key={s.id} style={{
+                    background: "#fff", border: "1px solid #e9eaf0", borderRadius: 12,
+                    padding: "14px 16px", display: "flex", alignItems: "center",
+                    justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+                    boxShadow: "0 1px 4px rgba(0,0,0,.04)",
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 3 }}>{s.query}</p>
+                      <p style={{ fontSize: 12, color: "#9ca3af" }}>
+                        {s.location || "Any location"} · {s.platforms.join(", ")}
+                      </p>
                     </div>
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontSize: 36, fontWeight: 900, color: scoreColor[item.tone], letterSpacing: "-0.05em" }}>{item.score}</div>
-                      <div style={{ fontSize: 12, color: "#637083" }}>Deal score</div>
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      <button
+                        onClick={() => { setQuery(s.query); setLocation(s.location || ""); doSearch(s.query, s.location || ""); }}
+                        style={{ padding: "7px 16px", borderRadius: 9, border: "none", background: "#4f46e5", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Run ▶
+                      </button>
+                      <button
+                        onClick={() => setSaved(prev => prev.filter(x => x.id !== s.id))}
+                        style={{ padding: "7px 12px", borderRadius: 9, border: "1.5px solid #e2e3ef", background: "transparent", color: "#9ca3af", fontSize: 13, cursor: "pointer" }}
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
-        </div>
-      </div>
-    </>
+        )}
+      </main>
+
+      {/* ── Footer ── */}
+      <footer style={{
+        borderTop: "1px solid #e9eaf0", background: "#fff",
+        padding: "18px 16px", textAlign: "center",
+      }}>
+        <p style={{ fontSize: 13, color: "#9ca3af" }}>
+          DealFinder · Built by{" "}
+          <a href="https://buymeacoffee.com" target="_blank" rel="noreferrer"
+            style={{ color: "#4f46e5", fontWeight: 700 }}>
+            Johnb
+          </a>
+          {" "}· Powered by AI
+        </p>
+      </footer>
+    </div>
   );
 }
