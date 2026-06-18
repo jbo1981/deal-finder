@@ -273,7 +273,7 @@ export default function DealFinder() {
     setSaved(prev => [entry, ...prev.filter(s => s.query !== query.trim())].slice(0, 20));
   };
 
-  /* Search */  const doSearch = async (q = query) => {
+  /* Search */    const doSearch = async (q = query) => {
     if (!q.trim()) return;
     setLoading(true);
     setError(null);
@@ -289,10 +289,12 @@ export default function DealFinder() {
           title: item.title,
           price: parseFloat(String(item.price).replace(/[^0-9.]/g, '')) || 0,
           image: item.image || "",
-          link: item.link || "#",
+          link: item.url || item.link || "#",
           source: item.platform || "Amazon",
           dealScore: Math.floor(Math.random() * (97 - 70 + 1)) + 70
         }));
+        
+        // Safety checks to update whatever your state is named
         if (typeof setResults === 'function') setResults(mappedResults);
         if (typeof setListings === 'function') setListings(mappedResults);
       } else {
@@ -305,9 +307,9 @@ export default function DealFinder() {
     }
   };
 
-  const oldSearch = 
-
-  const doSearch = useCallback(async (q = query, loc = location) => {
+      
+        
+  const oldSearch = useCallback(async (q = query, loc = location) => {
     if (!q.trim()) { inputRef.current?.focus(); return; }
     setLoading(true);
     setError(null);
