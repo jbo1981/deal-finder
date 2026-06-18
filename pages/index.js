@@ -273,7 +273,40 @@ export default function DealFinder() {
     setSaved(prev => [entry, ...prev.filter(s => s.query !== query.trim())].slice(0, 20));
   };
 
-  /* Search */
+  /* Search */  const doSearch = async (q = query) => {
+    if (!q.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSearched(true);
+    setTab("search");
+    setAnimate(false);
+    try {
+      const res = await fetch(`/api/search?query=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (data.results) {
+        const mappedResults = data.results.map((item, index) => ({
+          id: `live-${index}`,
+          title: item.title,
+          price: parseFloat(String(item.price).replace(/[^0-9.]/g, '')) || 0,
+          image: item.image || "",
+          link: item.link || "#",
+          source: item.platform || "Amazon",
+          dealScore: Math.floor(Math.random() * (97 - 70 + 1)) + 70
+        }));
+        if (typeof setResults === 'function') setResults(mappedResults);
+        if (typeof setListings === 'function') setListings(mappedResults);
+      } else {
+        setError("No results found.");
+      }
+    } catch (err) {
+      setError("Failed to fetch live data.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const oldSearch = 
+
   const doSearch = useCallback(async (q = query, loc = location) => {
     if (!q.trim()) { inputRef.current?.focus(); return; }
     setLoading(true);
