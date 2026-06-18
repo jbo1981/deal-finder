@@ -335,7 +335,7 @@ Rules:
       setResults(items);
       setAnimate(true);
     } catch (e) {
-      setError("Search failed — please try again.");
+      setError("Search failed: " + (e.message || String(e)));
     } finally {
       setLoading(false);
     }
